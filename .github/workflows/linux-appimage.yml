@@ -1,0 +1,181 @@
+name: Linux AppImage
+
+# Builds the (Windows) launcher and wraps it into a Linux AppImage that runs
+# it through Wine. See packaging/appimage/README.md for details and caveats.
+#
+# The managed code cross-builds on Linux, but PostSharp (the IL weaver that
+# implements [NotifyPropertyChanged] for the WPF view models) must load the
+# real WindowsDesktop runtime assemblies to weave, and those are
+# Windows-only R2R binaries that cannot be loaded on Linux. The build is
+# therefore done on a Windows runner and only the packaging step runs on
+# Linux.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [lite]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+    branches: [lite]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+  # aka.ms permalink — always resolves to the latest .NET 8 Desktop Runtime
+  # offline installer (win-x64). Pin an exact builds.dotnet.microsoft.com
+  # URL here if you need reproducible artifacts.
+  DOTNET_DESKTOP_RUNTIME_URL: 'https://aka.ms/dotnet/8.0/windowsdesktop-runtime-win-x64.exe'
+
+jobs:
+  # -----------------------------------------------------------------------
+  # 1. Build the launcher (Windows / WPF, framework-dependent win-x64)
+  # -----------------------------------------------------------------------
+  build-windows:
+    name: Build launcher (win-x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Use CI build targets
+        # Replace the AssemblyInfo auto-rewrite target with the CI-safe one
+        # (same trick as build-test.yml).
+        shell: bash
+        run: |
+          cp -f \
+            "${GITHUB_WORKSPACE}/BedrockLauncher/Github.Directory.Build.targets" \
+            "${GITHUB_WORKSPACE}/BedrockLauncher/Directory.Build.targets"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Publish BedrockLauncher
+        shell: pwsh
+        run: |
+          dotnet publish "${env:GITHUB_WORKSPACE}/BedrockLauncher/BedrockLauncher.csproj" `
+            -c Release `
+            -f net8.0-windows10.0.17763.0 `
+            -r win-x64 `
+            --self-contained false `
+            -p:EnableWindowsTargeting=true `
+            -o "${env:GITHUB_WORKSPACE}/publish/win-x64"
+          if (-not (Test-Path "${env:GITHUB_WORKSPACE}/publish/win-x64/BedrockLauncher.exe")) {
+            throw "publish output is missing BedrockLauncher.exe"
+          }
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: BedrockLauncher-win-x64
+          path: publish/win-x64
+          if-no-files-found: error
+          retention-days: 7
+
+  # -----------------------------------------------------------------------
+  # 2. Package the Windows build into a Linux AppImage (Wine bridge)
+  # -----------------------------------------------------------------------
+  appimage:
+    name: Build Linux AppImage
+    needs: build-windows
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout packaging files
+        uses: actions/checkout@v4
+
+      - name: Download Windows build
+        uses: actions/download-artifact@v4
+        with:
+          name: BedrockLauncher-win-x64
+          path: publish/win-x64
+
+      - name: Determine version string
+        id: vars
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="continuous-${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download .NET Desktop Runtime installer
+        run: |
+          curl -fL --retry 3 -o windowsdesktop-runtime-win-x64.exe \
+            "${DOTNET_DESKTOP_RUNTIME_URL}"
+          # Sanity check: the aka.ms link must serve an executable, not an
+          # error page.
+          file windowsdesktop-runtime-win-x64.exe | grep -q 'PE32\|MS-DOS'
+
+      - name: Assemble AppDir
+        run: |
+          set -euo pipefail
+          APPDIR="$PWD/AppDir"
+          mkdir -p \
+            "$APPDIR/usr/bin" \
+            "$APPDIR/usr/share/dotnet"
+
+          # Windows build (payload executed through Wine)
+          cp -a publish/win-x64/. "$APPDIR/usr/bin/"
+          rm -f "$APPDIR/usr/bin"/*.pdb
+
+          # Bundled .NET 8 Desktop Runtime offline installer (installed into
+          # the dedicated Wine prefix on first launch)
+          cp windowsdesktop-runtime-win-x64.exe \
+             "$APPDIR/usr/share/dotnet/windowsdesktop-runtime-win-x64.exe"
+
+          # AppImage plumbing
+          cp packaging/appimage/AppRun "$APPDIR/AppRun"
+          chmod 755 "$APPDIR/AppRun"
+          cp packaging/appimage/bedrocklauncher.desktop "$APPDIR/"
+          cp packaging/appimage/bedrocklauncher.png "$APPDIR/"
+
+          # Make every payload file readable/executable for all users
+          # (appimagetool warns about restrictive modes otherwise)
+          chmod -R a+rX "$APPDIR"
+
+          echo "AppDir tree (top level):"
+          find "$APPDIR" -maxdepth 2 -mindepth 1 | sort | head -30
+
+      - name: Fetch appimagetool
+        run: |
+          curl -fL --retry 3 -o appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool
+
+      - name: Build AppImage
+        env:
+          ARCH: x86_64
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          OUTPUT="BedrockLauncher-Linux-x86_64-${VERSION}.AppImage"
+          ./appimagetool AppDir "$OUTPUT"
+          ls -lh ./*.AppImage
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BedrockLauncher-Linux-AppImage
+          path: |
+            *.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+      # ---------------------------------------------------------------------
+      # 3. Release (only for tags matching v*)
+      # ---------------------------------------------------------------------
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.AppImage
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

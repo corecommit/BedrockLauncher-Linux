@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Bedrock Launcher
+GenericName=Minecraft Bedrock Launcher
+Comment=Unofficial Minecraft for Windows launcher (Linux/Wine research build)
+Exec=AppRun
+Icon=bedrocklauncher
+Terminal=false
+Categories=Game;ActionGame;
+Keywords=minecraft;bedrock;launcher;windows;wine;
+StartupNotify=true
+StartupWMClass=BedrockLauncher.exe
+X-AppImage-Version=1.0.0

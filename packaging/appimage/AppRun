@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# ----------------------------------------------------------------------------
+# AppRun — BedrockLauncher (Linux / Wine research build)
+#
+# The launcher itself is a native Windows WPF application (net8.0-windows).
+# This AppImage ships the Windows build and runs it through Wine, using a
+# dedicated, isolated Wine prefix so nothing touches your existing Wine setup.
+#
+# Requirements: Wine 9.x or newer (https://wiki.winehq.org/Download).
+#
+# Environment overrides:
+#   WINE              Path to the wine binary to use
+#   WINEPREFIX        Alternative full Wine prefix path (defaults to a
+#                     dedicated prefix, NOT ~/.wine)
+#   WINEDEBUG         Wine debug channels (defaults to -all)
+#   BLL_FORCE_RUNTIME Set to 1 to re-run the bundled .NET runtime installer
+#   BLL_NO_INSTALL    Set to 1 to skip the .NET runtime installation entirely
+# ----------------------------------------------------------------------------
+set -u
+
+APPDIR_CANDIDATE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+PAYLOAD="$APPDIR_CANDIDATE/usr/bin"
+RUNTIME_INSTALLER="$APPDIR_CANDIDATE/usr/share/dotnet/windowsdesktop-runtime-win-x64.exe"
+
+export WINEARCH="${WINEARCH:-win64}"
+export WINEDEBUG="${WINEDEBUG:--all}"
+export WINEPREFIX="${WINEPREFIX:-$HOME/.local/share/BedrockLauncher-Linux/prefix}"
+
+log() { printf '[BedrockLauncher] %s\n' "$*" >&2; }
+
+# --------------------------------------------------------------------------
+# 1. Locate a Wine binary
+# --------------------------------------------------------------------------
+if [ -n "${WINE:-}" ] && command -v "${WINE}" >/dev/null 2>&1; then
+    WINE_BIN="${WINE}"
+elif [ -n "${WINE:-}" ] && [ -x "${WINE}" ]; then
+    WINE_BIN="${WINE}"
+elif command -v wine >/dev/null 2>&1; then
+    WINE_BIN="$(command -v wine)"
+else
+    log "ERROR: Wine was not found on this system."
+    log "       Install Wine 9.x or newer (https://wiki.winehq.org/Download)"
+    log "       or point the WINE environment variable at a wine binary."
+    exit 127
+fi
+log "Using Wine: $WINE_BIN"
+log "Wine prefix: $WINEPREFIX"
+
+# The Windows build targets win-x64, so it needs a 64-bit prefix.
+if [ -d "$WINEPREFIX" ] && [ -f "$WINEPREFIX/system.reg" ] \
+   && ! grep -q '#arch=win64' "$WINEPREFIX/system.reg" 2>/dev/null; then
+    log "WARNING: the existing prefix at \$WINEPREFIX is not a win64 prefix."
+    log "         The launcher is a 64-bit executable and will fail to start."
+    log "         Remove the prefix (or set WINEPREFIX to a new path) and retry."
+fi
+
+# --------------------------------------------------------------------------
+# 2. One-time prefix bootstrap + .NET 8 Desktop Runtime installation
+# --------------------------------------------------------------------------
+RUNTIME_MARKER="$WINEPREFIX/.bll_dotnet_desktop_8_ok"
+
+bootstrap_prefix() {
+    if [ -d "$WINEPREFIX/drive_c" ]; then
+        return 0
+    fi
+    log "Creating a new Wine prefix (this happens only once)..."
+    mkdir -p "$WINEPREFIX"
+    # Suppress the wine-mono / wine-gecko download prompts; the .NET 8
+    # Desktop Runtime is installed from the offline installer below.
+    WINEDLLOVERRIDES="mscoree,mshtml=" "$WINE_BIN" wineboot -i >/dev/null 2>&1 || true
+    "$WINE_BIN" wineserver -w 2>/dev/null || true
+}
+
+install_runtime() {
+    if [ "${BLL_NO_INSTALL:-0}" = "1" ]; then
+        return 0
+    fi
+    if [ -f "$RUNTIME_MARKER" ] && [ "${BLL_FORCE_RUNTIME:-0}" != "1" ]; then
+        return 0
+    fi
+    if [ ! -f "$RUNTIME_INSTALLER" ]; then
+        log "WARNING: bundled .NET Desktop Runtime installer is missing."
+        log "         If the launcher fails to start, install it manually:"
+        log "         WINEPREFIX='$WINEPREFIX' winetricks dotnetdesktop8"
+        return 0
+    fi
+    log "Installing .NET Desktop Runtime 8 into the prefix (one time; please wait)..."
+    if "$WINE_BIN" "$RUNTIME_INSTALLER" /q /norestart; then
+        touch "$RUNTIME_MARKER"
+        log ".NET Desktop Runtime installed."
+    else
+        log "WARNING: the runtime installer exited with an error."
+        log "         If the launcher fails to start, try one of:"
+        log "           BLL_FORCE_RUNTIME=1  <run AppImage again>"
+        log "           WINEPREFIX='$WINEPREFIX' winetricks dotnetdesktop8"
+    fi
+}
+
+bootstrap_prefix
+install_runtime
+
+# --------------------------------------------------------------------------
+# 3. Launch
+# --------------------------------------------------------------------------
+if [ ! -f "$PAYLOAD/BedrockLauncher.exe" ]; then
+    log "ERROR: $PAYLOAD/BedrockLauncher.exe not found — the AppImage is broken."
+    exit 1
+fi
+
+# The launcher expects to be started from its own directory.
+cd "$PAYLOAD" || exit 1
+log "Starting BedrockLauncher..."
+exec "$WINE_BIN" BedrockLauncher.exe "$@"
