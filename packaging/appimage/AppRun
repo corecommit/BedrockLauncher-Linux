@@ -15,6 +15,11 @@
 #   WINEDEBUG         Wine debug channels (defaults to -all)
 #   BLL_FORCE_RUNTIME Set to 1 to re-run the bundled .NET runtime installer
 #   BLL_NO_INSTALL    Set to 1 to skip the .NET runtime installation entirely
+#
+# Launcher arguments are passed through, e.g.:
+#   ./BedrockLauncher...AppImage --offline
+#     starts the launcher in offline mode (cached version list, no update
+#     check, no news downloads)
 # ----------------------------------------------------------------------------
 set -u
 
@@ -103,7 +108,22 @@ install_runtime
 # 3. Launch
 # --------------------------------------------------------------------------
 if [ ! -f "$PAYLOAD/BedrockLauncher.exe" ]; then
-    log "ERROR: $PAYLOAD/BedrockLauncher.exe not found — the AppImage is broken."
+    log "ERROR: $PAYLOAD/BedrockLauncher.exe not found."
+    log ""
+    log "This AppImage has no launcher payload. The AppImage does not"
+    log "compile anything itself — it bundles the Windows (win-x64) build"
+    log "produced by the 'Linux AppImage' GitHub workflow."
+    log ""
+    log "Most likely causes:"
+    log "  * The AppImage was assembled locally, but 'dotnet publish' failed"
+    log "    or was skipped first. Note: publishing the Windows build ON"
+    log "    LINUX FAILS (PostSharp cannot weave WPF apps on Linux) — build"
+    log "    on Windows or let the GitHub workflow build it."
+    log "  * usr/bin was emptied before appimagetool ran."
+    log ""
+    log "Fix: run the 'Linux AppImage' workflow on your fork and download"
+    log "the 'BedrockLauncher-Linux-AppImage' artifact, or follow"
+    log "packaging/appimage/README.md on a Windows machine."
     exit 1
 fi
 

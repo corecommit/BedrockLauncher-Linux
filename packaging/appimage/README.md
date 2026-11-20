@@ -60,6 +60,62 @@ Subsequent launches skip straight to step 4.
 Launcher data (profiles, installations, settings) lives inside the prefix at
 `~/.local/share/BedrockLauncher-Linux/prefix/drive_c/users/<you>/AppData/Roaming/.minecraft_bedrock/`.
 
+## Offline mode
+
+The launcher supports an `--offline` startup flag. Arguments pass through
+the AppImage:
+
+```sh
+./BedrockLauncher-Linux-x86_64-<version>.AppImage --offline
+```
+
+In offline mode the launcher:
+
+- loads the **cached** version list instead of syncing with Microsoft's
+  servers (so the version picker still shows everything you have seen
+  online before),
+- skips the launcher update check,
+- skips news/patch-note downloads.
+
+Everything local still works: profiles, installed versions, launching an
+already-installed version, editing installations. Only *downloading new
+versions* needs the internet (obviously — the files aren't on your disk).
+
+## Version selection
+
+The launcher itself has version selection built in — every "installation"
+(isolation profile for a world/profile group) is bound to one game version,
+and you pick it when creating or editing an installation. The settings page
+also filters what the picker shows (Releases / Betas / Previews, UWP vs GDK).
+
+To choose **which launcher version** goes into the AppImage, run the
+workflow manually (Actions → Linux AppImage → Run workflow) and fill the
+**launcher_ref** input with any branch, tag or commit SHA — for example an
+upstream release tag. Leave it empty to build the branch you dispatch from.
+
+## Troubleshooting
+
+### `BedrockLauncher.exe not found`
+
+The AppImage contains no payload — the Windows build never made it into
+`usr/bin/`. The AppImage does not compile anything; it only packages the
+`dotnet publish` output.
+
+By far the most common cause: **assembling the AppImage locally on Linux**.
+`dotnet publish` for this project **fails on Linux** (PostSharp, the IL
+weaver behind the WPF `INotifyPropertyChanged` code, cannot load the
+Windows-only WPF runtime assemblies on Linux), so `publish/win-x64/` ends up
+empty and appimagetool happily packs an AppImage without the exe.
+
+Fixes:
+
+- Preferred: run the **Linux AppImage** workflow on your fork (it builds on
+  a Windows runner) and download the artifact. The workflow now fails fast
+  with a clear error if the payload is missing instead of shipping a broken
+  AppImage.
+- Or do the `dotnet publish` step on a Windows machine, copy
+  `publish/win-x64/` over, then assemble as described below.
+
 ## What works / what does not
 
 Works (expected, under recent Wine):

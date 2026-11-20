@@ -120,9 +120,13 @@ namespace BedrockLauncher.Downloaders
                 gdkLinksDBFile,
                 gdkVersionsDBFile);
 
+            // In offline mode (--offline) the version list is loaded from the
+            // local cache only; no network sync, no Microsoft Store refresh.
+            bool offline = Handlers.StartupArgsHandler.OfflineMode;
+
             await VersionDB.LoadVersions(
-                true,
-                Properties.LauncherSettings.Default.FetchVersionsFromMicrosoftStore);
+                !offline,
+                Properties.LauncherSettings.Default.FetchVersionsFromMicrosoftStore && !offline);
 
             List<VersionInfoJson> versionList = VersionDB.GetVersions();
 

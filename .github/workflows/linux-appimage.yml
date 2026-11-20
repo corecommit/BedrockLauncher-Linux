@@ -12,6 +12,11 @@ name: Linux AppImage
 
 on:
   workflow_dispatch:
+    inputs:
+      launcher_ref:
+        description: 'Launcher version to build (branch, tag or commit SHA). Empty = the branch you run the workflow from.'
+        required: false
+        default: ''
   push:
     branches: [lite]
     paths-ignore:
@@ -40,6 +45,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          # workflow_dispatch "launcher_ref" input lets you build any
+          # launcher version (branch / tag / SHA); push & PR events use
+          # the triggering ref.
+          ref: ${{ inputs.launcher_ref || github.ref }}
 
       - name: Use CI build targets
         # Replace the AssemblyInfo auto-rewrite target with the CI-safe one
@@ -88,12 +97,26 @@ jobs:
     steps:
       - name: Checkout packaging files
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.launcher_ref || github.ref }}
 
       - name: Download Windows build
         uses: actions/download-artifact@v4
         with:
           name: BedrockLauncher-win-x64
           path: publish/win-x64
+
+      - name: Verify downloaded payload
+        # Fail loudly here instead of producing a broken AppImage that
+        # errors with "BedrockLauncher.exe not found" at runtime.
+        run: |
+          set -euo pipefail
+          if [ ! -f publish/win-x64/BedrockLauncher.exe ]; then
+            echo "::error::publish/win-x64/BedrockLauncher.exe is missing from the downloaded artifact."
+            echo "The build-windows job produced an incomplete artifact — re-run the whole workflow."
+            exit 1
+          fi
+          echo "Payload OK:" $(ls publish/win-x64/BedrockLauncher.exe)
 
       - name: Determine version string
         id: vars
@@ -148,6 +171,16 @@ jobs:
           curl -fL --retry 3 -o appimagetool \
             "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
           chmod +x appimagetool
+
+      - name: Verify AppDir before packaging
+        run: |
+          set -euo pipefail
+          test -f AppDir/AppRun                        || { echo "::error::AppDir/AppRun missing"; exit 1; }
+          test -x AppDir/AppRun                        || { echo "::error::AppDir/AppRun is not executable"; exit 1; }
+          test -f AppDir/bedrocklauncher.desktop       || { echo "::error::desktop file missing"; exit 1; }
+          test -f AppDir/bedrocklauncher.png           || { echo "::error::icon missing"; exit 1; }
+          test -f AppDir/usr/bin/BedrockLauncher.exe   || { echo "::error::AppDir/usr/bin/BedrockLauncher.exe missing — payload was not copied"; exit 1; }
+          echo "AppDir verified."
 
       - name: Build AppImage
         env:

@@ -60,12 +60,14 @@ namespace BedrockLauncher
             await MainViewModel.Default.ShowWaitingDialog(async () =>
             {
                 Trace.WriteLine("Preparing Application...");
-                await RuntimeHandler.InitalizeBugRockOfTheWeek();
+                bool offline = Handlers.StartupArgsHandler.OfflineMode;
+                if (offline) Trace.WriteLine("Offline mode: skipping startup network activity (--offline)");
+                if (!offline) await RuntimeHandler.InitalizeBugRockOfTheWeek();
                 LanguageManager.Init();
                 MainDataModel.Default.LoadConfig();
                 await MainDataModel.Default.LoadVersions(true);
                 MainDataModel.Default.ProgressBarState.PlayButtonLanguageChanged = !MainDataModel.Default.ProgressBarState.PlayButtonLanguageChanged;
-                if (await MainDataModel.Updater.CheckForUpdatesAsync(true)) MainViewModel.Default.UpdateButton.ShowUpdateButton();
+                if (!offline && await MainDataModel.Updater.CheckForUpdatesAsync(true)) MainViewModel.Default.UpdateButton.ShowUpdateButton();
                 Trace.WriteLine("Preparing Application: DONE");
             });
         }

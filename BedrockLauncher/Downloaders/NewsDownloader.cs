@@ -18,6 +18,8 @@ namespace BedrockLauncher.Downloaders
     {
         public static async Task UpdateOfficialFeed(NewsViewModel viewModel)
         {
+            if (Handlers.StartupArgsHandler.OfflineMode) return;
+
             await Application.Current.Dispatcher.InvokeAsync(() =>
             {
                 viewModel.FeedItemsOfficial.Clear();
@@ -62,6 +64,8 @@ namespace BedrockLauncher.Downloaders
         });
         public static async Task UpdateRSSFeed(RSSViewModel viewModel) => await Application.Current.Dispatcher.InvokeAsync(async () =>
         {
+            if (Handlers.StartupArgsHandler.OfflineMode) return;
+
             try
             {
                 viewModel.FeedItems.Clear();

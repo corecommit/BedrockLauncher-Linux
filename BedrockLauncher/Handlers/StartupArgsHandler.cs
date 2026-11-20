@@ -27,6 +27,7 @@ namespace BedrockLauncher.Handlers
         private const string CLOSE_ON_LAUNCH_ARG = "--closeOnLaunch";
         private const string PRESIST_ON_LAUNCH_ARG = "--keepOpenOnLaunch";
         private const string CONSOLE_ARGS = "--console";
+        private const string OFFLINE_ARG = "--offline";
 
         private const string WRONG_ARGUMENT_MESSAGE = "Wrong argument, try --help, argument given:";
 
@@ -34,6 +35,7 @@ namespace BedrockLauncher.Handlers
         {
              "Avaliable Arguments:",
              string.Format("{0} - {1}", CONSOLE_ARGS, "Show the console on startup"),
+             string.Format("{0} - {1}", OFFLINE_ARG, "Start in offline mode: skip version list syncing, update checks and news downloads (uses the cached version list)"),
              string.Format("{0} - {1}", HELP_ARG, "Show avaliable arguments"),
              string.Format("{0} - {1}", NO_WINDOW_ARG, "Hide main window from showing up (WARNING: Will only be killable using task manager)"),
              string.Format("{0} - {1}", CLOSE_ON_LAUNCH_ARG, string.Format("Close launcher after launch when using the '{0}' argument", LAUNCH_INSTALLATION_ARG)),
@@ -46,39 +48,38 @@ namespace BedrockLauncher.Handlers
         private static bool KeepOpenOnLaunch { get; set; } = false;
         private static bool LaunchEditor { get; set; } = false;
 
+        /// <summary>
+        /// True when the launcher was started with --offline.
+        /// Startup network activity (version list sync, launcher update check,
+        /// news feeds) is skipped and the cached version list is used instead.
+        /// </summary>
+        public static bool OfflineMode { get; private set; } = false;
+
         private static void PraseEarlyArgs(string[] args)
         {
             if (args == null) return;
 
-            bool KillApp = false;
-            bool EndPrase = false;
-
+            // The early parser runs before the main window exists, so it must
+            // never close the app. It only handles args that must take effect
+            // before startup work begins (--console, --offline); every other
+            // argument is passed through to PraseArgs() below.
             for (int i = 0; i < args.Length; i++)
             {
                 string argument = args[i];
                 switch (argument)
                 {
-
                     case CONSOLE_ARGS:
                         Program.cli.Show();
                         App.Current.MainWindow = null;
                         break;
-                    case NO_WINDOW_ARG:
-                    case CLOSE_ON_LAUNCH_ARG:
-                    case PRESIST_ON_LAUNCH_ARG:
-                    case LAUNCH_INSTALLATION_ARG:
-                    case HELP_ARG:
+                    case OFFLINE_ARG:
+                        OfflineMode = true;
+                        break;
                     default:
-                        InvalidMessage(argument);
-                        KillApp = true;
-                        goto EscapeLoop;
+                        // handled later by PraseArgs()
+                        break;
                 }
             }
-
-        EscapeLoop:
-
-            if (EndPrase) return;
-            else if (KillApp) Application.Current.MainWindow.Close();
         }
 
         private static void PraseArgs(string[] args)
@@ -104,6 +105,9 @@ namespace BedrockLauncher.Handlers
                         break;
                     case EDITOR_ARG:
                         LaunchEditor = true;
+                        break;
+                    case OFFLINE_ARG:
+                        // already applied by the early parser
                         break;
                     case LAUNCH_INSTALLATION_ARG:
                         bool result = LaunchInstallation(args, i);
