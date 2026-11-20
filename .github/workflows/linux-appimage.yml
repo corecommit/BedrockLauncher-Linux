@@ -7,8 +7,8 @@ name: Linux AppImage
 # implements [NotifyPropertyChanged] for the WPF view models) must load the
 # real WindowsDesktop runtime assemblies to weave, and those are
 # Windows-only R2R binaries that cannot be loaded on Linux. The build is
-# therefore done on a Windows runner and only the packaging step runs on
-# Linux.
+# therefore done on a Windows runner (through VS MSBuild — see the comment
+# at the "Setup MSBuild" step) and only the packaging step runs on Linux.
 
 on:
   workflow_dispatch:
@@ -64,16 +64,30 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      # PostSharp hosts its compiler on the *newest* .NET runtime when driven
+      # by `dotnet publish` (10.0.x on current windows-latest images) and then
+      # refuses to weave unless a WindowsDesktop runtime of that exact version
+      # is installed — the images ship a slightly older one, so the build dies
+      # with "No compatible version of requested runtime framework
+      # Microsoft.WindowsDesktop.App". Building through VS MSBuild instead (a
+      # .NET Framework process) makes PostSharp use its net472 flavour and
+      # resolve the net8.0-windows runtime normally — the same setup as the
+      # upstream windows-build.yml workflow.
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
       - name: Publish BedrockLauncher
         shell: pwsh
         run: |
-          dotnet publish "${env:GITHUB_WORKSPACE}/BedrockLauncher/BedrockLauncher.csproj" `
-            -c Release `
-            -f net8.0-windows10.0.17763.0 `
-            -r win-x64 `
-            --self-contained false `
-            -p:EnableWindowsTargeting=true `
-            -o "${env:GITHUB_WORKSPACE}/publish/win-x64"
+          msbuild "${env:GITHUB_WORKSPACE}/BedrockLauncher/BedrockLauncher.csproj" `
+            /restore `
+            /t:Publish `
+            /p:Configuration=Release `
+            /p:TargetFramework=net8.0-windows10.0.17763.0 `
+            /p:RuntimeIdentifier=win-x64 `
+            /p:SelfContained=false `
+            /p:PublishDir="${env:GITHUB_WORKSPACE}/publish/win-x64/" `
+            /verbosity:minimal
           if (-not (Test-Path "${env:GITHUB_WORKSPACE}/publish/win-x64/BedrockLauncher.exe")) {
             throw "publish output is missing BedrockLauncher.exe"
           }
