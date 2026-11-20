@@ -1,0 +1,46 @@
+From 258b02dc5706431d3d2acd5fa7397d46554e372d Mon Sep 17 00:00:00 2001
+From: Z User <z@container>
+Date: Fri, 20 Nov 2026 08:50:58 +0000
+Subject: [PATCH] Drop /p:TargetFramework global from the msbuild publish
+ command
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+MSBuild global properties flow into every project reference during
+NuGet restore, so forcing TargetFramework=net8.0-windows10.0.17763.0
+made the modules (Localization, UpdateProcessor, Extensions.NET,
+HtmlRenderer) restore with the wrong TFM target in their
+project.assets.json, while the build phase lets each reference use its
+own net6.0-windows TFM — NETSDK1005, no output.
+
+BedrockLauncher.csproj is single-target, so no override is needed.
+---
+ .github/workflows/linux-appimage.yml | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/.github/workflows/linux-appimage.yml b/.github/workflows/linux-appimage.yml
+index 65b99e8..5d71648 100644
+--- a/.github/workflows/linux-appimage.yml
++++ b/.github/workflows/linux-appimage.yml
+@@ -79,11 +79,16 @@ jobs:
+       - name: Publish BedrockLauncher
+         shell: pwsh
+         run: |
++          # NOTE: do NOT pass /p:TargetFramework here. MSBuild global
++          # properties flow into every project reference during restore,
++          # which makes NuGet write the wrong TFM target into the modules'
++          # project.assets.json (their own TFM is net6.0-windows) and the
++          # build then fails with NETSDK1005. BedrockLauncher.csproj is
++          # single-target, so no TFM override is needed.
+           msbuild "${env:GITHUB_WORKSPACE}/BedrockLauncher/BedrockLauncher.csproj" `
+             /restore `
+             /t:Publish `
+             /p:Configuration=Release `
+-            /p:TargetFramework=net8.0-windows10.0.17763.0 `
+             /p:RuntimeIdentifier=win-x64 `
+             /p:SelfContained=false `
+             /p:PublishDir="${env:GITHUB_WORKSPACE}/publish/win-x64/" `
+-- 
+2.47.3
+
