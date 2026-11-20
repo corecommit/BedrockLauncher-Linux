@@ -7,8 +7,9 @@ name: Linux AppImage
 # implements [NotifyPropertyChanged] for the WPF view models) must load the
 # real WindowsDesktop runtime assemblies to weave, and those are
 # Windows-only R2R binaries that cannot be loaded on Linux. The build is
-# therefore done on a Windows runner (through VS MSBuild — see the comment
-# at the "Setup MSBuild" step) and only the packaging step runs on Linux.
+# therefore done on a Windows runner and only the packaging step runs on
+# Linux. See the comment at the "Setup MSBuild" step for the .NET-version
+# pinning (global.json + PostSharpToolsRuntimeVersion).
 
 on:
   workflow_dispatch:
@@ -64,15 +65,19 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      # PostSharp hosts its compiler on the *newest* .NET runtime when driven
-      # by `dotnet publish` (10.0.x on current windows-latest images) and then
-      # refuses to weave unless a WindowsDesktop runtime of that exact version
-      # is installed — the images ship a slightly older one, so the build dies
-      # with "No compatible version of requested runtime framework
-      # Microsoft.WindowsDesktop.App". Building through VS MSBuild instead (a
-      # .NET Framework process) makes PostSharp use its net472 flavour and
-      # resolve the net8.0-windows runtime normally — the same setup as the
-      # upstream windows-build.yml workflow.
+      # PostSharp (the IL weaver behind [NotifyPropertyChanged]) hosts its
+      # compiler on the .NET runtime that matches the SDK resolving the
+      # project. windows-latest images now ship .NET 10/11 SDKs whose newest
+      # runtime (e.g. 10.0.15) has no matching Microsoft.WindowsDesktop.App
+      # runtime installed, so PostSharp dies with "No compatible version of
+      # requested runtime framework Microsoft.WindowsDesktop.App".
+      #
+      # Two pins keep everything on .NET 8 (the launcher's target):
+      #   * global.json — the SDK resolver (dotnet CLI *and* VS MSBuild) picks
+      #     the newest 8.0.4xx SDK instead of 10/11.
+      #   * /p:PostSharpToolsRuntimeVersion=8.0 — PostSharp picks the highest
+      #     installed 8.0.x of each framework (NETCore + WindowsDesktop, which
+      #     the SDK bundles as a matched pair) and disables roll-forward.
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
@@ -91,6 +96,7 @@ jobs:
             /p:Configuration=Release `
             /p:RuntimeIdentifier=win-x64 `
             /p:SelfContained=false `
+            /p:PostSharpToolsRuntimeVersion=8.0 `
             /p:PublishDir="${env:GITHUB_WORKSPACE}/publish/win-x64/" `
             /verbosity:minimal
           if (-not (Test-Path "${env:GITHUB_WORKSPACE}/publish/win-x64/BedrockLauncher.exe")) {
